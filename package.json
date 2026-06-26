@@ -1,0 +1,40 @@
+{
+  "name": "mechmark",
+  "version": "0.1.0",
+  "description": "MechMark — engineering screenshot annotation tool for mechanical engineers",
+  "private": true,
+  "type": "module",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "node tools/devserver.js",
+    "start": "node tools/devserver.js",
+    "app": "electron .",
+    "dist": "electron-builder --win"
+  },
+  "build": {
+    "appId": "com.mechmark.app",
+    "productName": "MechMark",
+    "files": [
+      "electron/**/*",
+      "src/**/*",
+      "index.html"
+    ],
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] },
+        { "target": "portable", "arch": ["x64"] }
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "deleteAppDataOnUninstall": false
+    }
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^26.15.3"
+  },
+  "author": "",
+  "license": "UNLICENSED"
+}

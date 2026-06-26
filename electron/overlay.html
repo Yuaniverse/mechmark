@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>MechMark — Select region</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%; height: 100%;
+      overflow: hidden;
+      background: transparent;
+      cursor: crosshair;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    /* The frozen screenshot fills the whole overlay (1 CSS px == 1 DIP). */
+    #shot {
+      position: fixed; inset: 0;
+      width: 100%; height: 100%;
+      display: block;
+      pointer-events: none;
+      -webkit-user-drag: none;
+    }
+    /* Four scrim panels dim everything OUTSIDE the selection, leaving the
+       selection itself showing the bright, undimmed screenshot underneath. */
+    .scrim {
+      position: fixed;
+      background: rgba(8, 11, 16, 0.55);
+      pointer-events: none;
+    }
+    #scrim-top    { left: 0; top: 0; width: 100%; }
+    #scrim-bottom { left: 0; width: 100%; }
+    #scrim-left   {}
+    #scrim-right  {}
+    /* Selection outline. */
+    #sel {
+      position: fixed;
+      border: 1px solid #4da3ff;
+      box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
+      pointer-events: none;
+      display: none;
+    }
+    /* Live size readout. */
+    #readout {
+      position: fixed;
+      display: none;
+      padding: 3px 7px;
+      font: 12px/1.2 ui-monospace, "Cascadia Mono", Consolas, monospace;
+      color: #eaf2ff;
+      background: rgba(13, 18, 26, 0.92);
+      border: 1px solid rgba(77, 163, 255, 0.6);
+      border-radius: 4px;
+      white-space: nowrap;
+      pointer-events: none;
+      z-index: 10;
+    }
+    /* Hint shown before a drag begins. */
+    #hint {
+      position: fixed;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      padding: 10px 16px;
+      font: 13px/1.3 system-ui, "Segoe UI", sans-serif;
+      color: #cfe0f5;
+      background: rgba(13, 18, 26, 0.8);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 8px;
+      pointer-events: none;
+      z-index: 10;
+    }
+    body.dragging #hint { display: none; }
+  </style>
+</head>
+<body>
+  <img id="shot" alt="" />
+  <div class="scrim" id="scrim-top"></div>
+  <div class="scrim" id="scrim-bottom"></div>
+  <div class="scrim" id="scrim-left"></div>
+  <div class="scrim" id="scrim-right"></div>
+  <div id="sel"></div>
+  <div id="readout"></div>
+  <div id="hint">Drag to select a region &nbsp;·&nbsp; Esc or right-click to cancel</div>
+  <script src="./overlay.js"></script>
+</body>
+</html>

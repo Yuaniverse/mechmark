@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MechMark</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./src/styles.css">
+</head>
+<body>
+
+<!-- ===== Icon sprite (Direction A spec) ===== -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="ic-select" viewBox="0 0 24 24"><path d="M5 3 L5 19 L9.2 15 L11.8 21 L14 20 L11.4 14.2 L17 14 Z"></path></symbol>
+  <symbol id="ic-linear" viewBox="0 0 24 24"><path d="M4 7 V17 M20 7 V17 M5.5 12 H18.5"></path><path d="M8 9.5 L5 12 L8 14.5"></path><path d="M16 9.5 L19 12 L16 14.5"></path></symbol>
+  <symbol id="ic-chain" viewBox="0 0 24 24"><path d="M3 7 V17 M12 7 V17 M21 7 V17 M4.5 12 H10.5 M13.5 12 H19.5"></path><path d="M6.5 10.5 L4.5 12 L6.5 13.5 M17.5 10.5 L19.5 12 L17.5 13.5"></path></symbol>
+  <symbol id="ic-angle" viewBox="0 0 24 24"><path d="M5 19 H21 M5 19 L18 6"></path><path d="M12 19 A7 7 0 0 0 10 14.2"></path></symbol>
+  <symbol id="ic-radius" viewBox="0 0 24 24"><circle cx="11" cy="13" r="7"></circle><path d="M11 13 L18 7"></path></symbol>
+  <symbol id="ic-diameter" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"></circle><path d="M6 12 H18"></path><path d="M9 9.5 L6.5 12 L9 14.5"></path><path d="M15 9.5 L17.5 12 L15 14.5"></path></symbol>
+  <symbol id="ic-leader" viewBox="0 0 24 24"><path d="M4 19 L11 12 L20 12"></path><path d="M4 19 L8 18 M4 19 L5.5 15.2"></path></symbol>
+  <symbol id="ic-arrow" viewBox="0 0 24 24"><path d="M5 19 L19 5"></path><path d="M19 5 L12.5 6 M19 5 L18 11.5"></path></symbol>
+  <symbol id="ic-rect" viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="12" rx="1"></rect></symbol>
+  <symbol id="ic-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"></circle></symbol>
+  <symbol id="ic-text" viewBox="0 0 24 24"><path d="M6 6 H18 M12 6 V18 M9.5 18 H14.5"></path></symbol>
+  <symbol id="ic-pen" viewBox="0 0 24 24"><path d="M15 4 L20 9 L9 20 L4 20 L4 15 Z"></path><path d="M13 6 L18 11"></path></symbol>
+  <symbol id="ic-highlighter" viewBox="0 0 24 24"><path d="M9 3 H16 V10 L12.5 13.5 L9 10 Z"></path><path d="M6 20 H18"></path></symbol>
+  <symbol id="ic-balloon" viewBox="0 0 24 24"><circle cx="9" cy="9" r="5.2"></circle><path d="M12.7 12.7 L20 20"></path><path d="M20 20 L20 16 M20 20 L16 20"></path></symbol>
+  <symbol id="ic-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="12" rx="1.5"></rect><path d="M5 16 V5 a1 1 0 0 1 1 -1 H14"></path></symbol>
+  <symbol id="ic-save" viewBox="0 0 24 24"><path d="M5 4 H16 L20 8 V20 H5 Z"></path><path d="M8 4 V9 H15"></path><path d="M8 20 V14 H17 V20"></path></symbol>
+  <symbol id="ic-undo" viewBox="0 0 24 24"><path d="M8 6 L3 11 L8 16"></path><path d="M3 11 H14 a6 6 0 0 1 6 6 V18"></path></symbol>
+  <symbol id="ic-clear" viewBox="0 0 24 24"><path d="M5 7 H19 M9 7 V5 H15 V7 M7 7 V19 H17 V7 M10 10 V16 M14 10 V16"></path></symbol>
+  <symbol id="ic-new" viewBox="0 0 24 24"><path d="M7 3 H14 L19 8 V21 H7 Z"></path><path d="M14 3 V8 H19 M12 11 V17 M9 14 H15"></path></symbol>
+  <symbol id="ic-min" viewBox="0 0 24 24"><path d="M5 12 H19"></path></symbol>
+  <symbol id="ic-max" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12"></rect></symbol>
+  <symbol id="ic-close" viewBox="0 0 24 24"><path d="M6 6 L18 18 M18 6 L6 18"></path></symbol>
+</svg>
+
+<div class="app">
+  <!-- ===== Title bar ===== -->
+  <div class="titlebar">
+    <div class="app-mark"></div>
+    <div class="app-name">MechMark</div>
+    <div class="filename" id="filename">未命名截圖</div>
+    <div class="win-controls">
+      <button class="win-btn" title="最小化"><svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6"><use href="#ic-min"></use></svg></button>
+      <button class="win-btn" title="最大化"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6"><use href="#ic-max"></use></svg></button>
+      <button class="win-btn win-close" title="關閉"><svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6"><use href="#ic-close"></use></svg></button>
+    </div>
+  </div>
+
+  <!-- ===== Style bar ===== -->
+  <div class="stylebar">
+    <!-- line width -->
+    <div class="sb-group">
+      <span class="sb-label">線粗</span>
+      <div class="stepper" data-stepper="lineWidth">
+        <button class="step-btn" data-step="-1">−</button>
+        <div class="step-val" id="val-lineWidth">2.5</div>
+        <button class="step-btn" data-step="1">+</button>
+      </div>
+    </div>
+    <div class="sb-div"></div>
+    <!-- text size -->
+    <div class="sb-group">
+      <span class="sb-label">文字</span>
+      <div class="stepper" data-stepper="textSize">
+        <button class="step-btn" data-step="-1">−</button>
+        <div class="step-val" id="val-textSize">15</div>
+        <button class="step-btn" data-step="1">+</button>
+      </div>
+    </div>
+    <div class="sb-div"></div>
+    <!-- colors -->
+    <div class="sb-group swatches" id="swatches">
+      <button class="swatch active" data-color="#E5342B" style="background:#E5342B" title="紅"></button>
+      <button class="swatch" data-color="#2563EB" style="background:#2563EB" title="藍"></button>
+      <button class="swatch" data-color="#16A34A" style="background:#16A34A" title="綠"></button>
+      <button class="swatch" data-color="#FACC15" style="background:#FACC15" title="黃"></button>
+      <button class="swatch swatch-dark" data-color="#111827" style="background:#111827" title="黑"></button>
+      <button class="swatch" data-color="#FFFFFF" style="background:#FFFFFF" title="白"></button>
+      <button class="swatch swatch-custom" data-color="custom" title="自訂顏色"></button>
+      <input type="color" id="custom-color" value="#E5342B" hidden>
+    </div>
+    <div class="sb-div"></div>
+    <!-- line style -->
+    <div class="segmented" id="lineStyle">
+      <button class="seg-cell active" data-linestyle="solid"><svg width="20" height="6"><path d="M1 3 H19" stroke="#1f2430" stroke-width="2"></path></svg></button>
+      <button class="seg-cell" data-linestyle="dashed"><svg width="20" height="6"><path d="M1 3 H19" stroke="#6b7280" stroke-width="2" stroke-dasharray="3 3"></path></svg></button>
+    </div>
+    <div class="sb-div"></div>
+    <!-- fill (rect / circle, PowerPoint-style) -->
+    <div class="sb-group fills" id="fills">
+      <span class="sb-label">填滿</span>
+      <button class="fillswatch fill-none active" data-fill="none" title="無填滿"></button>
+      <button class="fillswatch" data-fill="#E5342B" style="background:#E5342B" title="紅"></button>
+      <button class="fillswatch" data-fill="#2563EB" style="background:#2563EB" title="藍"></button>
+      <button class="fillswatch" data-fill="#16A34A" style="background:#16A34A" title="綠"></button>
+      <button class="fillswatch" data-fill="#FACC15" style="background:#FACC15" title="黃"></button>
+      <button class="fillswatch" data-fill="#111827" style="background:#111827" title="黑"></button>
+      <button class="fillswatch fill-white" data-fill="#FFFFFF" style="background:#FFFFFF" title="白"></button>
+    </div>
+    <div class="sb-div"></div>
+    <!-- special chars -->
+    <div class="sb-group specials" id="specials">
+      <button class="spec-btn" data-glyph="Ø">Ø</button>
+      <button class="spec-btn" data-glyph="R">R</button>
+      <button class="spec-btn" data-glyph="±">±</button>
+      <button class="spec-btn" data-glyph="°">°</button>
+      <button class="spec-btn" data-glyph="⌀">⌀</button>
+    </div>
+    <!-- right cluster -->
+    <div class="sb-right">
+      <button class="icon-btn" id="btn-new" title="開新檔（清空圖片與標註）"><svg width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-new"></use></svg></button>
+      <button class="icon-btn" id="btn-clear" title="清除所有標註"><svg width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-clear"></use></svg></button>
+      <button class="icon-btn" id="btn-undo" title="復原 (Ctrl+Z)"><svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-undo"></use></svg></button>
+      <button class="btn-secondary" id="btn-copy"><svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><use href="#ic-copy"></use></svg>複製</button>
+      <button class="btn-primary" id="btn-save"><svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><use href="#ic-save"></use></svg>存 PNG</button>
+    </div>
+  </div>
+
+  <!-- ===== Body: rail + canvas ===== -->
+  <div class="body">
+    <div class="rail" id="rail"><!-- tool buttons injected by main.js --></div>
+
+    <div class="canvas-wrap" id="canvas-wrap">
+      <canvas id="canvas"></canvas>
+      <!-- inline number/text editor overlay -->
+      <input type="text" id="inline-input" class="inline-input" hidden>
+      <textarea id="inline-textarea" class="inline-input inline-textarea" hidden></textarea>
+      <!-- floating zoom -->
+      <div class="zoom">
+        <button class="zoom-btn" id="zoom-out">−</button>
+        <div class="zoom-val" id="zoom-val">100%</div>
+        <button class="zoom-btn" id="zoom-in">+</button>
+      </div>
+      <!-- drop hint when no image loaded -->
+      <div class="drop-hint" id="drop-hint">
+        <div class="drop-title">貼上、拖曳或開啟截圖開始標註</div>
+        <div class="drop-sub">Ctrl+V 貼上　·　拖曳圖檔到此　·　或直接在空白畫布上標註</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Status bar ===== -->
+  <div class="statusbar">
+    <button class="ortho-pill" id="ortho-pill">
+      <span class="ortho-dot on" id="ortho-dot"></span>
+      <span class="ortho-text" id="ortho-text">正交鎖定 開</span>
+      <span class="ortho-key">F8</span>
+    </button>
+    <span class="status-hint">按住 Shift：暫時切換正交鎖定（開↔關）</span>
+    <div class="status-right">
+      <span id="coords">x 0 · y 0</span>
+      <span id="objcount">0 個物件</span>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
