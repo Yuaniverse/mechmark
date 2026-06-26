@@ -42,10 +42,32 @@ function drawLeaderLabel(ctx, { pos, text, fontSize, color, anchor }) {
   return { center: { x: left + maxW / 2, y: pos.y }, w: maxW + pad * 2, h: h + pad * 2 };
 }
 
+// World-space box of the hanging text label, mirroring drawLeaderLabel's
+// geometry. Returns null when there's no text. Used so bounds()/export include
+// the label, which can extend well past the shoulder end.
+function labelBox(o) {
+  if (!o.text) return null;
+  const c = labelBox._cv || (labelBox._cv = document.createElement('canvas').getContext('2d'));
+  const fs = o.style.textSize;
+  c.font = `${fs}px 'IBM Plex Sans', system-ui, sans-serif`;
+  const lines = String(o.text).split('\n');
+  let maxW = 0; for (const l of lines) maxW = Math.max(maxW, c.measureText(l).width);
+  const lineH = fs * 1.25, h = lines.length * lineH, pad = 3, gap = 4;
+  const right = o.shoulderEnd.x >= o.elbow.x;
+  const posX = o.shoulderEnd.x + (right ? gap : -gap);
+  const left = right ? posX : posX - maxW;
+  return {
+    minX: left - pad, maxX: left + maxW + pad,
+    minY: o.shoulderEnd.y - h / 2 - pad, maxY: o.shoulderEnd.y + h / 2 + pad,
+  };
+}
+
 export const type = {
   draw(ctx, o, env) { render(ctx, o, env); },
   bounds(o) {
     const xs = [o.tip.x, o.elbow.x, o.shoulderEnd.x], ys = [o.tip.y, o.elbow.y, o.shoulderEnd.y];
+    const lb = labelBox(o);
+    if (lb) { xs.push(lb.minX, lb.maxX); ys.push(lb.minY, lb.maxY); }
     return { minX: Math.min(...xs), minY: Math.min(...ys), maxX: Math.max(...xs), maxY: Math.max(...ys) };
   },
   hitTest(o, p, env) {

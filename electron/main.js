@@ -153,18 +153,19 @@ function saveSettings() {
   catch (err) { console.error('[mechmark] could not save settings:', err); }
 }
 
+// The `--hidden` arg makes the boot launch start straight into the tray.
+// IMPORTANT (Windows): the SAME path+args must be passed to BOTH
+// setLoginItemSettings and getLoginItemSettings, otherwise getLoginItemSettings
+// can't match the registry entry and openAtLogin always reads back false —
+// which made the toggle look like it did nothing.
+const LOGIN_ITEM_OPTS = { path: process.execPath, args: ['--hidden'] };
 // Register/unregister the OS "launch at login" entry to match `startOnBoot`.
 // Only writes the registry for the PACKAGED app — in a dev run process.execPath
 // is electron.exe, and a login entry pointing there would launch a broken shell.
-// The `--hidden` arg makes the boot launch start straight into the tray.
 function applyLoginItem() {
   if (!app.isPackaged) return;
   try {
-    app.setLoginItemSettings({
-      openAtLogin: startOnBoot,
-      path: process.execPath,
-      args: ['--hidden'],
-    });
+    app.setLoginItemSettings({ openAtLogin: startOnBoot, ...LOGIN_ITEM_OPTS });
   } catch (err) {
     console.error('[mechmark] could not set login item:', err);
   }
@@ -173,7 +174,7 @@ function applyLoginItem() {
 // persisted intent in dev (where we don't touch the registry).
 function isStartOnBootEnabled() {
   if (!app.isPackaged) return startOnBoot;
-  try { return app.getLoginItemSettings().openAtLogin; }
+  try { return app.getLoginItemSettings(LOGIN_ITEM_OPTS).openAtLogin; }
   catch { return startOnBoot; }
 }
 // Register `accel` as the sole capture hotkey. Returns false if the OS/another
@@ -309,6 +310,11 @@ if (!gotLock) {
 
 app.whenReady().then(() => {
   loadSettings();
+  // Reconcile the OS login entry with the persisted intent on every launch.
+  // saveSettings() is the source of truth for what the user wants; the registry
+  // can drift (manual removal via Windows Settings/Task Manager, reinstall to a
+  // new path). No-op in dev (applyLoginItem guards on app.isPackaged).
+  applyLoginItem();
   registerAppProtocol();
   createMainWindow();
   createTray();

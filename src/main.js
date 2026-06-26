@@ -21,12 +21,12 @@ async function loadOptional(paths) {
   }
 }
 
-const RAIL_ORDER = ['select', 'linear', 'chain', 'angle', 'radius', 'diameter', 'leader', 'arrow', 'rect', 'ellipse', 'text', 'pen', 'highlighter', 'balloon'];
+const RAIL_ORDER = ['select', 'crop', 'linear', 'chain', 'angle', 'radius', 'diameter', 'leader', 'line', 'arrow', 'rect', 'ellipse', 'text', 'pen', 'highlighter', 'balloon'];
 
 await loadOptional([
   './tools/angle.js', './tools/radius.js', './tools/diameter.js', './tools/leader.js',
-  './tools/arrow.js', './tools/rect.js', './tools/ellipse.js', './tools/text.js',
-  './tools/pen.js', './tools/highlighter.js', './tools/balloon.js',
+  './tools/line.js', './tools/arrow.js', './tools/rect.js', './tools/ellipse.js', './tools/text.js',
+  './tools/pen.js', './tools/highlighter.js', './tools/balloon.js', './tools/crop.js',
 ]);
 for (const m of MODULES) register(m);
 
@@ -350,7 +350,14 @@ document.addEventListener('keydown', (e) => {
   // below; Ctrl+V here only fires when the internal object clipboard is non-empty.
   if ((e.ctrlKey || e.metaKey) && !e.altKey) {
     const ck = e.key.toLowerCase();
-    if (ck === 'c' && app.selection.size) { if (copySelection()) e.preventDefault(); return; }
+    if (ck === 'c') {
+      e.preventDefault();
+      if (app.selection.size) copySelection();        // selected objects → internal clipboard
+      else copyToClipboard(scene)                       // nothing selected → whole canvas image → OS clipboard
+        .then(() => flash('btn-copy', '已複製'))
+        .catch(() => flash('btn-copy', '複製失敗', true));
+      return;
+    }
     if (ck === 'v' && objClipboard.length) { e.preventDefault(); pasteClipboard(); return; }
     if (ck === 'd' && app.selection.size) { e.preventDefault(); if (copySelection()) pasteClipboard(); return; }
   }

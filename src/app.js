@@ -77,6 +77,7 @@ export class App {
       endTextInput: () => self.ui.endTextInput?.(),
       typeFor,
       hitTest: (world, opts) => self.hitTest(world, opts),
+      setTool: (id) => self.setTool(id),
     };
   }
 

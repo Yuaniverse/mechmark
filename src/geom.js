@@ -80,6 +80,17 @@ export function orthoSnap(a, b) {
   return Math.abs(dx) >= Math.abs(dy) ? { x: b.x, y: a.y } : { x: a.x, y: b.y };
 }
 
+// Snap endpoint B to the nearest `stepDeg`-degree increment around A, keeping
+// the cursor distance. PowerPoint's Shift-line behaviour (15° steps → includes
+// pure H/V "正交" at 0/90/180 and the 45° diagonals).
+export function snapAngle(a, b, stepDeg = 15) {
+  const d = sub(b, a), r = len(d);
+  if (r < 1e-9) return { ...b };
+  const step = (stepDeg * Math.PI) / 180;
+  const ang = Math.round(angleOf(d) / step) * step;
+  return { x: a.x + Math.cos(ang) * r, y: a.y + Math.sin(ang) * r };
+}
+
 // Axis-aligned bounding box helpers.
 export function bboxOf(points) {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
