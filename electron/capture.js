@@ -5,17 +5,29 @@
 // Flow (PRD §4, FR-IO-1 / FR-IO-5):
 //   1. Enumerate displays + grab a native-resolution screenshot of each via
 //      desktopCapturer.
-//   2. Spawn one frameless transparent fullscreen overlay BrowserWindow per
-//      display, positioned at that display's DIP bounds.
-//   3. Each overlay pulls its own screenshot + scaleFactor through the
-//      'overlay:get-shot' invoke handler (keyed by the asking BrowserWindow).
+//   2. Reuse one frameless transparent fullscreen overlay BrowserWindow per
+//      display from a persistent POOL (created once, hidden between captures),
+//      positioned at that display's DIP bounds.
+//   3. Each overlay is "armed" by a pushed 'overlay:arm' message carrying its
+//      DIP-resolution screenshot + scaleFactor.
 //   4. On 'overlay:commit', crop the DEVICE-pixel nativeImage by the DIP rect
-//      scaled by that display's scaleFactor, send the PNG to the main window,
-//      tear down every overlay, refocus main.
-//   5. On 'overlay:cancel', just tear down + refocus.
+//      scaled by that display's per-axis scale, send the PNG to the main window,
+//      then HIDE every overlay (keep them for the next capture), refocus main.
+//   5. On 'overlay:cancel', just hide overlays + refocus.
+//
+// Performance notes:
+//   - The overlay BACKGROUND is encoded at DIP resolution, not native: the crop
+//     uses the retained full-resolution nativeImage (shot.image), so display
+//     fidelity is irrelevant to output quality. Encoding a 1920x1080 PNG instead
+//     of a 3840x2160 one is several times faster (the dominant per-capture cost).
+//   - Overlay windows are POOLED: creating + loadURL'ing a BrowserWindow on every
+//     hotkey press is slow; we create them once and reuse (hide/show).
+//   - prewarmCapture() (called from main once the UI has loaded) warms the
+//     desktopCapturer pipeline and pre-creates one overlay so the FIRST capture
+//     isn't a cold start.
 //
 // Robust to multiple overlays open across monitors: a single in-flight session
-// owns all overlays; the first commit/cancel wins and closes the rest.
+// owns all active overlays; the first commit/cancel wins and hides the rest.
 import { BrowserWindow, desktopCapturer, ipcMain, screen, nativeImage } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -25,14 +37,13 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // Only one capture session may be live at a time.
 let session = null;
 
-/**
- * Per-overlay record. `shot` carries everything the overlay needs to render
- * and everything we need to crop correctly.
- *   shot.image       — nativeImage at DEVICE pixels (full display screenshot)
- *   shot.dataUrl     — PNG data URL of the above (handed to the renderer)
- *   shot.scaleFactor — display.scaleFactor (DIP -> device multiplier)
- *   shot.width/height— DIP (CSS) size of the display = bounds.width/height
- */
+// Persistent pool of reusable overlay windows. Each entry:
+//   { win, ready, pendingArm, shot, active }
+//     ready      — renderer has signaled 'overlay:ready' (safe to .send to it)
+//     pendingArm — arm payload queued until `ready` (first capture before load)
+//     shot       — the shot currently armed on this window (for crop lookup)
+//     active     — part of the in-flight session
+const pool = [];
 
 /** Map app:// URL for an overlay file under electron/. */
 function overlayUrl() {
@@ -46,14 +57,26 @@ function overlayUrl() {
  * box while preserving aspect, and Windows fractional scaling means
  * image.width !== round(bounds.width * scaleFactor) in general. Per-axis sx/sy
  * naturally handle upscaling, letterboxing, and fractional DPI.
+ *
+ * The `dataUrl` (overlay background) is encoded at DIP resolution for speed —
+ * the full-resolution `image` is kept for the actual crop.
  */
 function makeShot(d, image) {
   const sz = image.getSize(); // device pixels (whatever the capturer returned)
   const sx = d.bounds.width > 0 ? sz.width / d.bounds.width : 1;
   const sy = d.bounds.height > 0 ? sz.height / d.bounds.height : 1;
+
+  // Encode the overlay background at DIP size: the overlay's <img> fills the
+  // window (1 CSS px == 1 DIP), so a DIP-resolution source is all it needs to
+  // display, and PNG-encoding it is far cheaper than encoding native pixels.
+  let preview = image;
+  if (sz.width !== d.bounds.width || sz.height !== d.bounds.height) {
+    preview = image.resize({ width: d.bounds.width, height: d.bounds.height, quality: 'good' });
+  }
+
   return {
-    image,
-    dataUrl: image.toDataURL(),
+    image, // DEVICE pixels — used for the real crop (full fidelity)
+    dataUrl: preview.toDataURL(), // DIP pixels — overlay background only
     scaleFactor: d.scaleFactor || 1, // kept only for the overlay px readout
     sx, // device-pixels-per-DIP, X axis (true crop scale)
     sy, // device-pixels-per-DIP, Y axis (true crop scale)
@@ -65,7 +88,7 @@ function makeShot(d, image) {
 
 /**
  * Enumerate displays and capture each at native (device-pixel) resolution.
- * Returns a Map<display.id(number), shot>.
+ * Returns { displays, byDisplayId: Map<display.id(number), shot> }.
  */
 async function captureDisplays() {
   const displays = screen.getAllDisplays();
@@ -144,18 +167,118 @@ async function captureDisplays() {
   return { displays, byDisplayId };
 }
 
-/** Tear down all overlays and refocus the main window. Idempotent. */
+// ---- Overlay window pool ----
+
+/** Create one hidden, reusable overlay window and add it to the pool. */
+function createOverlayWindow() {
+  const win = new BrowserWindow({
+    width: 800,
+    height: 600,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    hasShadow: false,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    enableLargerThanScreen: true,
+    show: false,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+      preload: join(__dirname, 'overlay-preload.cjs'),
+    },
+  });
+
+  // Navigation hardening: deny window.open and block navigation away from the
+  // trusted app://bundle/ origin (overlays run a preload with sandbox:false).
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  win.webContents.on('will-navigate', (e, url) => {
+    if (!url.startsWith('app://bundle/')) e.preventDefault();
+  });
+
+  // Keep it pinned above everything (including fullscreen apps) on Windows.
+  win.setAlwaysOnTop(true, 'screen-saver');
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+
+  const rec = { win, ready: false, pendingArm: null, shot: null, active: false };
+
+  // If the OS/crash destroys an overlay, drop it from the pool; if it was part
+  // of a live session, treat as cancel.
+  win.on('closed', () => {
+    const i = pool.indexOf(rec);
+    if (i >= 0) pool.splice(i, 1);
+    if (session && rec.active) endSession();
+  });
+
+  pool.push(rec);
+  win.loadURL(overlayUrl());
+  return rec;
+}
+
+/** Ensure the pool holds at least `n` live windows (prunes destroyed ones). */
+function ensurePool(n) {
+  for (let i = pool.length - 1; i >= 0; i--) {
+    if (!pool[i].win || pool[i].win.isDestroyed()) pool.splice(i, 1);
+  }
+  while (pool.length < n) createOverlayWindow();
+}
+
+/** Position a pooled overlay over its display and show it. */
+function positionAndShow(rec, bounds) {
+  const w = rec.win;
+  if (!w || w.isDestroyed()) return;
+  w.setBounds(bounds);
+  w.setAlwaysOnTop(true, 'screen-saver');
+  w.show();
+  w.focus();
+}
+
+/** Arm a pooled overlay with a shot, then show it (queues if not yet loaded). */
+function armAndShow(rec, shot) {
+  rec.shot = shot;
+  rec.active = true;
+  const payload = {
+    dataUrl: shot.dataUrl,
+    width: shot.width,
+    height: shot.height,
+    scaleFactor: shot.scaleFactor,
+  };
+  if (rec.ready && rec.win && !rec.win.isDestroyed()) {
+    rec.win.webContents.send('overlay:arm', payload);
+    positionAndShow(rec, shot.bounds);
+  } else {
+    // Renderer not loaded yet (first capture): send on 'overlay:ready'.
+    rec.pendingArm = { payload, bounds: shot.bounds };
+  }
+}
+
+/** Hide all overlays in the pool and reset their renderer state for reuse. */
+function hideAllOverlays() {
+  for (const rec of pool) {
+    rec.active = false;
+    rec.shot = null;
+    rec.pendingArm = null;
+    const w = rec.win;
+    if (w && !w.isDestroyed()) {
+      if (rec.ready) { try { w.webContents.send('overlay:disarm'); } catch { /* ignore */ } }
+      if (w.isVisible()) w.hide();
+    }
+  }
+}
+
+/** Tear down the current session: hide overlays (kept for reuse), refocus main. */
 function endSession() {
   if (!session) return;
   const s = session;
   session = null; // clear first so late IPC is ignored
 
-  for (const rec of s.overlays) {
-    const w = rec.win;
-    if (w && !w.isDestroyed()) {
-      try { w.close(); } catch { /* ignore */ }
-    }
-  }
+  hideAllOverlays();
 
   const main = s.mainWindow;
   if (main && !main.isDestroyed()) {
@@ -173,6 +296,7 @@ function commitSelection(rec, rect) {
   if (!session) return;
   const main = session.mainWindow;
   const shot = rec.shot;
+  if (!shot) { endSession(); return; }
 
   const imgSize = shot.image.getSize(); // device pixels
 
@@ -214,26 +338,26 @@ function installIpc() {
   if (ipcInstalled) return;
   ipcInstalled = true;
 
-  // Overlay asks for its screenshot. Key by the asking BrowserWindow so each
-  // overlay gets ITS display's shot + scaleFactor.
-  ipcMain.handle('overlay:get-shot', (event) => {
-    if (!session) return null;
+  // Renderer signals its overlay UI has loaded and is listening for 'overlay:arm'.
+  ipcMain.on('overlay:ready', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
-    const rec = session.overlays.find((r) => r.win === win);
-    if (!rec) return null;
-    const shot = rec.shot;
-    return {
-      dataUrl: shot.dataUrl,
-      width: shot.width, // DIP
-      height: shot.height, // DIP
-      scaleFactor: shot.scaleFactor,
-    };
+    const rec = pool.find((r) => r.win === win);
+    if (!rec) return;
+    rec.ready = true;
+    if (rec.pendingArm) {
+      const { payload, bounds } = rec.pendingArm;
+      rec.pendingArm = null;
+      if (!rec.win.isDestroyed()) {
+        rec.win.webContents.send('overlay:arm', payload);
+        positionAndShow(rec, bounds);
+      }
+    }
   });
 
   ipcMain.on('overlay:commit', (event, payload) => {
     if (!session) return;
     const win = BrowserWindow.fromWebContents(event.sender);
-    const rec = session.overlays.find((r) => r.win === win);
+    const rec = session.active.find((r) => r.win === win);
     if (!rec || !payload || !payload.rect) { endSession(); return; }
     commitSelection(rec, payload.rect);
   });
@@ -242,6 +366,20 @@ function installIpc() {
     if (!session) return;
     endSession();
   });
+}
+
+/**
+ * Prewarm the capture pipeline so the FIRST hotkey press isn't a cold start.
+ * Safe to call multiple times; cheap and best-effort.
+ */
+export function prewarmCapture() {
+  installIpc();
+  // Pre-create one overlay window so it's loaded and 'ready' before first use.
+  ensurePool(1);
+  // Warm desktopCapturer's internal pipeline with a 1px probe (result ignored).
+  desktopCapturer
+    .getSources({ types: ['screen'], thumbnailSize: { width: 1, height: 1 } })
+    .catch(() => { /* best-effort */ });
 }
 
 /**
@@ -271,82 +409,29 @@ export async function startCapture(mainWindow) {
     return;
   }
 
+  // Only the displays we actually have a shot for get an overlay.
+  const targets = displays.filter((d) => byDisplayId.has(d.id));
+
   // Hide the main window so it is not part of the frozen capture surface and
   // does not steal the overlay's always-on-top z-order.
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.hide();
   }
 
-  session = { mainWindow, overlays: [] };
+  ensurePool(targets.length);
+  session = { mainWindow, active: [] };
 
-  for (const d of displays) {
+  for (let i = 0; i < targets.length; i++) {
+    const d = targets[i];
     const shot = byDisplayId.get(d.id);
-    if (!shot) continue;
-
-    const win = new BrowserWindow({
-      x: d.bounds.x,
-      y: d.bounds.y,
-      width: d.bounds.width,
-      height: d.bounds.height,
-      frame: false,
-      transparent: true,
-      backgroundColor: '#00000000',
-      hasShadow: false,
-      resizable: false,
-      movable: false,
-      minimizable: false,
-      maximizable: false,
-      fullscreenable: false,
-      skipTaskbar: true,
-      alwaysOnTop: true,
-      enableLargerThanScreen: true,
-      // Frameless transparent windows must not paint the OS background.
-      show: false,
-      webPreferences: {
-        contextIsolation: true,
-        nodeIntegration: false,
-        sandbox: false,
-        preload: join(__dirname, 'overlay-preload.cjs'),
-      },
-    });
-
-    // Navigation hardening: deny window.open and block navigation away from the
-    // trusted app://bundle/ origin (overlays run a preload with sandbox:false).
-    win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-    win.webContents.on('will-navigate', (e, url) => {
-      if (!url.startsWith('app://bundle/')) e.preventDefault();
-    });
-
-    // Keep it pinned above everything (including fullscreen apps) on Windows.
-    win.setAlwaysOnTop(true, 'screen-saver');
-    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-
-    const rec = { win, shot, display: d };
-    session.overlays.push(rec);
-
-    win.once('ready-to-show', () => {
-      if (win.isDestroyed()) return;
-      // Exact placement (DIP bounds) — reassert in case the OS nudged it.
-      win.setBounds(d.bounds);
-      win.show();
-      win.focus();
-    });
-
-    // If the OS closes an overlay out from under us, treat as cancel.
-    win.on('closed', () => {
-      if (session && session.overlays.some((r) => r.win === win)) {
-        // Only auto-cancel if this wasn't part of an intentional teardown.
-        // endSession() nulls `session`, so reaching here with a live session
-        // means an unexpected close.
-        endSession();
-      }
-    });
-
-    win.loadURL(overlayUrl());
+    const rec = pool[i];
+    if (!rec || !rec.win || rec.win.isDestroyed()) continue;
+    session.active.push(rec);
+    armAndShow(rec, shot);
   }
 
-  // Edge case: every source failed to produce a window.
-  if (session.overlays.length === 0) {
+  // Edge case: no overlay could be armed.
+  if (session.active.length === 0) {
     endSession();
     if (mainWindow && !mainWindow.isDestroyed()) { mainWindow.show(); mainWindow.focus(); }
   }

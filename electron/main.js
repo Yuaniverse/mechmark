@@ -1,7 +1,7 @@
 // ===== MechMark Electron shell (Phase 2) =====
 // Wraps the Phase-1 web canvas in a desktop window, serving the unchanged
 // ES-module engine over a custom privileged "app://" scheme (NOT file://).
-import { app, BrowserWindow, protocol, globalShortcut, ipcMain, net } from 'electron';
+import { app, BrowserWindow, protocol, globalShortcut, ipcMain, net, Tray, Menu, nativeImage } from 'electron';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join, normalize, sep } from 'node:path';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -139,16 +139,42 @@ function hardenNavigation(win) {
 // ---- Capture hotkey (persisted, user-customizable; PRD §4) ----
 const DEFAULT_HOTKEY = 'Control+Shift+2';
 let captureHotkey = DEFAULT_HOTKEY;
+let startOnBoot = false; // launch MechMark at login (minimized to tray)
 function settingsPath() { return join(app.getPath('userData'), 'settings.json'); }
 function loadSettings() {
   try {
     const s = JSON.parse(readFileSync(settingsPath(), 'utf8'));
     if (s && typeof s.captureHotkey === 'string' && s.captureHotkey) captureHotkey = s.captureHotkey;
+    if (s && typeof s.startOnBoot === 'boolean') startOnBoot = s.startOnBoot;
   } catch { /* no settings file yet — use the default */ }
 }
 function saveSettings() {
-  try { writeFileSync(settingsPath(), JSON.stringify({ captureHotkey }, null, 2)); }
+  try { writeFileSync(settingsPath(), JSON.stringify({ captureHotkey, startOnBoot }, null, 2)); }
   catch (err) { console.error('[mechmark] could not save settings:', err); }
+}
+
+// Register/unregister the OS "launch at login" entry to match `startOnBoot`.
+// Only writes the registry for the PACKAGED app — in a dev run process.execPath
+// is electron.exe, and a login entry pointing there would launch a broken shell.
+// The `--hidden` arg makes the boot launch start straight into the tray.
+function applyLoginItem() {
+  if (!app.isPackaged) return;
+  try {
+    app.setLoginItemSettings({
+      openAtLogin: startOnBoot,
+      path: process.execPath,
+      args: ['--hidden'],
+    });
+  } catch (err) {
+    console.error('[mechmark] could not set login item:', err);
+  }
+}
+// The OS is the source of truth for the UI when packaged; fall back to the
+// persisted intent in dev (where we don't touch the registry).
+function isStartOnBootEnabled() {
+  if (!app.isPackaged) return startOnBoot;
+  try { return app.getLoginItemSettings().openAtLogin; }
+  catch { return startOnBoot; }
 }
 // Register `accel` as the sole capture hotkey. Returns false if the OS/another
 // app already owns it (registration is rejected).
@@ -167,10 +193,49 @@ function registerHotkey(accel) {
   }
 }
 
+const APP_ICON = join(__dirname, 'app-icon.png');  // window / taskbar (256px)
+const TRAY_ICON = join(__dirname, 'tray-icon.png'); // system tray (32px)
+
 let mainWindow = null;
+let tray = null;
+// Set true only by the tray "Quit" action (or app.quit). While false, closing
+// the main window HIDES it to the tray instead of quitting the app.
+let isQuitting = false;
+let trayHintShown = false; // show the "minimized to tray" balloon only once
 function getMainWindow() {
   if (mainWindow && !mainWindow.isDestroyed()) return mainWindow;
   return null;
+}
+
+// Bring the main window back from the tray (restoring/creating as needed).
+function showMainWindow() {
+  let win = getMainWindow();
+  if (!win) win = createMainWindow();
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+}
+
+// System-tray icon + context menu. The window's close button hides to here.
+function createTray() {
+  if (tray) return;
+  let image = nativeImage.createFromPath(TRAY_ICON);
+  if (image.isEmpty()) image = nativeImage.createEmpty();
+  tray = new Tray(image);
+  tray.setToolTip('MechMark');
+  const menu = Menu.buildFromTemplate([
+    { label: '顯示 MechMark', click: () => showMainWindow() },
+    { label: '截圖', click: () => triggerCapture() },
+    { type: 'separator' },
+    {
+      label: '結束',
+      click: () => { isQuitting = true; app.quit(); },
+    },
+  ]);
+  tray.setContextMenu(menu);
+  // Single/double click on the tray icon restores the window.
+  tray.on('click', () => showMainWindow());
+  tray.on('double-click', () => showMainWindow());
 }
 
 function createMainWindow() {
@@ -180,6 +245,7 @@ function createMainWindow() {
     minWidth: 880,
     minHeight: 600,
     title: 'MechMark',
+    icon: APP_ICON,
     backgroundColor: '#0e1116',
     show: false,
     webPreferences: {
@@ -200,7 +266,31 @@ function createMainWindow() {
     console.log('[mechmark] main window loaded app://bundle/index.html');
   });
 
-  mainWindow.once('ready-to-show', () => mainWindow.show());
+  // When launched at login (`--hidden`), stay in the tray instead of popping the
+  // window. A manual launch (no flag) shows the window as usual.
+  const startHidden = process.argv.includes('--hidden');
+  mainWindow.once('ready-to-show', () => { if (!startHidden) mainWindow.show(); });
+
+  // Close button (X) hides to the system tray instead of quitting, unless a real
+  // quit was requested (tray "Quit" / app.quit). PRD-friendly: the global capture
+  // hotkey keeps working while the app lives in the tray.
+  mainWindow.on('close', (e) => {
+    if (!isQuitting) {
+      e.preventDefault();
+      mainWindow.hide();
+      // One-time hint so the user knows the app is still running in the tray
+      // (and not actually closed) the first time they hit X.
+      if (!trayHintShown && tray && !tray.isDestroyed()) {
+        trayHintShown = true;
+        try {
+          tray.displayBalloon({
+            title: 'MechMark 仍在執行',
+            content: '已縮小到系統匣，截圖熱鍵持續有效。點工作列圖示可開啟視窗，右鍵可結束。',
+          });
+        } catch { /* balloons are Windows-only / best-effort */ }
+      }
+    }
+  });
   mainWindow.on('closed', () => { mainWindow = null; });
 
   mainWindow.loadURL('app://bundle/index.html');
@@ -208,13 +298,34 @@ function createMainWindow() {
 }
 
 // ---- App lifecycle ----
+// Single-instance: with the app living in the tray, a second launch should just
+// surface the existing window rather than start a duplicate process.
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => showMainWindow());
+}
+
 app.whenReady().then(() => {
   loadSettings();
   registerAppProtocol();
   createMainWindow();
+  createTray();
 
   // Global capture hotkey (PRD §4, FR-IO-1). Phase 3 implements the overlay.
   registerHotkey(captureHotkey);
+
+  // Prewarm the capture pipeline so the FIRST hotkey press isn't a cold start
+  // (dynamic import of capture.js + first overlay-window/ capturer init). Done
+  // after the main window has loaded so it never competes with first paint.
+  mainWindow.webContents.once('did-finish-load', () => {
+    loadCaptureModule().then((mod) => {
+      if (mod && typeof mod.prewarmCapture === 'function') {
+        try { mod.prewarmCapture(); } catch { /* best-effort */ }
+      }
+    });
+  });
 
   // Renderer-initiated capture (preload: mechmarkHost.requestCapture()).
   ipcMain.on('mechmark:request-capture', () => { triggerCapture(); });
@@ -233,16 +344,29 @@ app.whenReady().then(() => {
     return { ok: false, hotkey: prev };
   });
 
+  // Launch-at-login customization from the renderer.
+  ipcMain.handle('mechmark:get-start-on-boot', () => isStartOnBootEnabled());
+  ipcMain.handle('mechmark:set-start-on-boot', (_e, enabled) => {
+    startOnBoot = !!enabled;
+    applyLoginItem();
+    saveSettings();
+    return isStartOnBootEnabled();
+  });
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
   });
 });
 
+// Any path that actually quits the app (tray Quit, OS shutdown, etc.) must flip
+// the flag so the main window's close handler stops hiding and lets it close.
+app.on('before-quit', () => { isQuitting = true; });
+
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
 });
 
-app.on('window-all-closed', () => {
-  // Windows: quit when all windows are closed.
-  if (process.platform !== 'darwin') app.quit();
-});
+// NOTE: we intentionally do NOT quit on window-all-closed. The app lives in the
+// system tray after the window is closed; quitting happens only via tray "Quit".
+// (The window's close handler hides instead of closing, so this normally won't
+// even fire — but if it does, keep the app alive.)

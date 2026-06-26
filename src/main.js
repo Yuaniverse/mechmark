@@ -494,3 +494,27 @@ async function setupHotkeyUI() {
   }, true); // capture phase: intercept before the tool/keyboard handlers
 }
 if (window.mechmarkHost?.isElectron) setupHotkeyUI();
+
+// ===== Launch-at-login toggle (Electron only) =====
+async function setupStartupUI() {
+  const anchor = document.getElementById('ortho-pill');
+  if (!anchor || !window.mechmarkHost.getStartOnBoot) return;
+  let on = !!(await window.mechmarkHost.getStartOnBoot());
+  const pill = document.createElement('button');
+  pill.className = 'ortho-pill startup-pill';
+  pill.title = '開機時自動啟動 MechMark（最小化到系統匣）';
+  pill.innerHTML =
+    '<span class="ortho-dot" id="startup-dot"></span>' +
+    '<span class="ortho-text" id="startup-text"></span>';
+  anchor.insertAdjacentElement('afterend', pill);
+  const dot = pill.querySelector('#startup-dot');
+  const text = pill.querySelector('#startup-text');
+  const render = () => { dot.classList.toggle('on', on); text.textContent = '開機啟動 ' + (on ? '開' : '關'); };
+  render();
+  pill.addEventListener('click', async () => {
+    pill.disabled = true;
+    try { on = !!(await window.mechmarkHost.setStartOnBoot(!on)); }
+    finally { pill.disabled = false; render(); }
+  });
+}
+if (window.mechmarkHost?.isElectron) setupStartupUI();

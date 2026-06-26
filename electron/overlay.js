@@ -159,17 +159,31 @@
     resetScrim();
   });
 
-  // ---- Boot: pull this overlay's screenshot from main ----
-  (async () => {
-    try {
-      const shot = host ? await host.getShot() : null;
+  // Reset all interaction/visual state. Called when (re)armed for a new capture
+  // and when disarmed — the overlay window is pooled and reused across captures.
+  function resetState() {
+    dragging = false;
+    committed = false;
+    startX = 0; startY = 0;
+    curRect = { x: 0, y: 0, w: 0, h: 0 };
+    document.body.classList.remove('dragging'); // brings the hint back
+    $sel.style.display = 'none';
+    $readout.style.display = 'none';
+    resetScrim();
+  }
+
+  // ---- Boot: arm/disarm are PUSHED from main (pooled, reused overlay) ----
+  if (host) {
+    // main pushes this overlay's screenshot for each capture.
+    host.onArm((shot) => {
       if (!shot) { cancel(); return; }
       scaleFactor = shot.scaleFactor || 1;
       $shot.src = shot.dataUrl;
-      resetScrim();
-    } catch (err) {
-      // If we can't get the screenshot, bail out cleanly.
-      cancel();
-    }
-  })();
+      resetState();
+    });
+    // main signals capture ended; clear state so the next show starts clean.
+    host.onDisarm(() => { resetState(); });
+    // Tell main we're listening; it will arm us (now or on the next capture).
+    host.ready();
+  }
 })();

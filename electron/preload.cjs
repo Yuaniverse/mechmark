@@ -28,4 +28,12 @@ contextBridge.exposeInMainWorld('mechmarkHost', {
   setHotkey(accelerator) {
     return ipcRenderer.invoke('mechmark:set-hotkey', accelerator);
   },
+  // Launch-at-login toggle. getStartOnBoot() -> boolean (current OS state);
+  // setStartOnBoot(enabled) -> boolean (resulting state).
+  getStartOnBoot() {
+    return ipcRenderer.invoke('mechmark:get-start-on-boot');
+  },
+  setStartOnBoot(enabled) {
+    return ipcRenderer.invoke('mechmark:set-start-on-boot', enabled);
+  },
 });
