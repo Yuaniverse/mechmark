@@ -62,6 +62,13 @@ export class Scene {
     this._restore(this._redo.pop());
   }
 
+  reset() {
+    this.objects = [];
+    this._undo = [];
+    this._redo = [];
+    this._emit();
+  }
+
   setImage(img, w, h) {
     this.baseImage = img;
     this.imageSize = { w, h };

@@ -442,6 +442,7 @@ window.mechmark.loadImage = async (src) => {
   afterImage();
 };
 window.mechmarkHost?.onCapture?.((dataUrl) => {
+  scene.reset();
   window.mechmark.loadImage(dataUrl).catch((err) => console.error('[mechmark] load capture failed:', err));
 });
 window.mechmarkHost?.onCaptureError?.((msg) => { console.error('[mechmark] capture error:', msg); alert(msg); });
